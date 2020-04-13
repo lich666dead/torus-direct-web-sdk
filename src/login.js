@@ -25,8 +25,10 @@ class DirectWebSDK {
     network = MAINNET,
     proxyContractAddress = "0x638646503746d5456209e33a2ff5e3226d698bea",
     enableLogging = false,
+    redirectToOpener = false,
   } = {}) {
     this.isInitialized = false;
+    this.redirectToOpener = redirectToOpener;
     const baseUri = new URL(baseUrl);
     this.config = {
       GOOGLE_CLIENT_ID,
@@ -71,6 +73,10 @@ class DirectWebSDK {
     }
   }
 
+  // chromeExtensionMessageExternalHandler() {
+
+  // }
+
   triggerLogin(typeOfLogin = GOOGLE, verifier) {
     return new Promise((resolve, reject) => {
       log.info("Verifier: ", verifier);
@@ -92,6 +98,7 @@ class DirectWebSDK {
             JSON.stringify({
               instanceId: this.torus.instanceId,
               verifier,
+              redirectToOpener: this.redirectToOpener,
             })
           )
         );
@@ -105,51 +112,102 @@ class DirectWebSDK {
           }&prompt=${prompt}`;
         const googleWindow = new PopupHandler({ url: finalUrl });
         const bc = new BroadcastChannel(`redirect_channel_${this.torus.instanceId}`, broadcastChannelOptions);
-        bc.addEventListener("message", async (ev) => {
-          try {
-            const {
-              instanceParams: { verifier: returnedVerifier },
-              hashParams: verifierParameters,
-            } = ev.data || {};
-            if (ev.error && ev.error !== "") {
-              log.error(ev.error);
-              reject(ev.error);
+        if (!this.redirectToOpener) {
+          bc.addEventListener("message", async (ev) => {
+            try {
+              const {
+                instanceParams: { verifier: returnedVerifier },
+                hashParams: verifierParameters,
+              } = ev.data || {};
+              if (ev.error && ev.error !== "") {
+                log.error(ev.error);
+                reject(ev.error);
+                return;
+              }
+              if (ev.data && returnedVerifier === verifier) {
+                log.info(ev.data);
+                const { access_token: accessToken, id_token: idToken } = verifierParameters;
+                const userInfo = await get("https://www.googleapis.com/userinfo/v2/me", {
+                  headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                  },
+                });
+                const { picture: profileImage, email, name } = userInfo || {};
+                const pubKeyDetails = await this.handleLogin(
+                  verifier,
+                  email.toString().toLowerCase(),
+                  { verifier_id: email.toString().toLowerCase() },
+                  idToken
+                );
+                resolve({
+                  profileImage,
+                  name,
+                  email,
+                  verifierId: email.toString().toLowerCase(),
+                  verifier,
+                  publicAddress: pubKeyDetails.ethAddress,
+                  privateKey: pubKeyDetails.privKey,
+                });
+              }
+            } catch (error) {
+              log.error(error);
+              reject(error);
               return;
+            } finally {
+              bc.close();
+              googleWindow.close();
             }
-            if (ev.data && returnedVerifier === verifier) {
-              log.info(ev.data);
-              const { access_token: accessToken, id_token: idToken } = verifierParameters;
-              const userInfo = await get("https://www.googleapis.com/userinfo/v2/me", {
-                headers: {
-                  Authorization: `Bearer ${accessToken}`,
-                },
-              });
-              const { picture: profileImage, email, name } = userInfo || {};
-              const pubKeyDetails = await this.handleLogin(
-                verifier,
-                email.toString().toLowerCase(),
-                { verifier_id: email.toString().toLowerCase() },
-                idToken
-              );
-              resolve({
-                profileImage,
-                name,
-                email,
-                verifierId: email.toString().toLowerCase(),
-                verifier,
-                publicAddress: pubKeyDetails.ethAddress,
-                privateKey: pubKeyDetails.privKey,
-              });
+          });
+        } else {
+          window.addEventListener("message", async (postMessageEvent) => {
+            try {
+              if (!postMessageEvent.data) return;
+              const ev = postMessageEvent.data;
+              if (ev.channel !== `redirect_channel_${this.torus.instanceId}`) return;
+              const {
+                instanceParams: { verifier: returnedVerifier },
+                hashParams: verifierParameters,
+              } = ev.data || {};
+              if (ev.error && ev.error !== "") {
+                log.error(ev.error);
+                reject(ev.error);
+                return;
+              }
+              if (ev.data && returnedVerifier === verifier) {
+                log.info(ev.data);
+                const { access_token: accessToken, id_token: idToken } = verifierParameters;
+                const userInfo = await get("https://www.googleapis.com/userinfo/v2/me", {
+                  headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                  },
+                });
+                const { picture: profileImage, email, name } = userInfo || {};
+                const pubKeyDetails = await this.handleLogin(
+                  verifier,
+                  email.toString().toLowerCase(),
+                  { verifier_id: email.toString().toLowerCase() },
+                  idToken
+                );
+                resolve({
+                  profileImage,
+                  name,
+                  email,
+                  verifierId: email.toString().toLowerCase(),
+                  verifier,
+                  publicAddress: pubKeyDetails.ethAddress,
+                  privateKey: pubKeyDetails.privKey,
+                });
+              }
+            } catch (error) {
+              log.error(error);
+              reject(error);
+              return;
+            } finally {
+              bc.close();
+              googleWindow.close();
             }
-          } catch (error) {
-            log.error(error);
-            reject(error);
-            return;
-          } finally {
-            bc.close();
-            googleWindow.close();
-          }
-        });
+          });
+        }
         googleWindow.open();
         googleWindow.once("close", () => {
           bc.close();
@@ -161,6 +219,7 @@ class DirectWebSDK {
             JSON.stringify({
               instanceId: this.torus.instanceId,
               verifier,
+              redirectToOpener: this.redirectToOpener,
             })
           )
         );
@@ -225,6 +284,7 @@ class DirectWebSDK {
             JSON.stringify({
               instanceId: this.torus.instanceId,
               verifier,
+              redirectToOpener: this.redirectToOpener,
             })
           )
         );
@@ -284,6 +344,7 @@ class DirectWebSDK {
             JSON.stringify({
               instanceId: this.torus.instanceId,
               verifier,
+              redirectToOpener: this.redirectToOpener,
             })
           )
         );
@@ -348,6 +409,7 @@ class DirectWebSDK {
             JSON.stringify({
               instanceId: this.torus.instanceId,
               verifier,
+              redirectToOpener: this.redirectToOpener,
             })
           )
         );
